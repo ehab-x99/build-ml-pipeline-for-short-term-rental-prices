@@ -4,52 +4,54 @@ Download from W&B the raw dataset and apply some basic data cleaning, exporting 
 """
 import argparse
 import logging
-import os
-import wandb
+
 import pandas as pd
+import wandb
 
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)-15s %(message)s")
 logger = logging.getLogger()
 
 
-def execute(args):
-    """
-    Basic cleaning procedure
-    """
+def go(args):
+
     run = wandb.init(job_type="basic_cleaning")
     run.config.update(args)
 
+    # Download input artifact. This will also log that this script is using this
+    # particular version of the artifact
     artifact_local_path = run.use_artifact(args.input_artifact).file()
+    logger.info('Input artifact received')
 
-    dataframe = pd.read_csv(artifact_local_path, index_col="id")
-    min_price = args.min_price
-    max_price = args.max_price
-    idx = dataframe['price'].between(min_price, max_price)
-    dataframe = dataframe[idx].copy()
-    logger.info("Dataset price outliers removal outside range: %s-%s",
-                 args.min_price, args.max_price)
-    dataframe['last_review'] = pd.to_datetime(dataframe['last_review'])
-    logger.info("Dataset last_review data type fix")
+    # read the input csv artifact
+    df = pd.read_csv(artifact_local_path)
 
-    idx = dataframe['longitude'].between(-74.25, -73.50) & dataframe['latitude'].between(40.5, 41.2)
-    dataframe = dataframe[idx].copy()
+    # filter outliers in 'price' column
+    idx = df['price'].between(args.min_price, args.max_price)
+    df = df[idx].copy()
 
-    tmp_artifact_path = os.path.join(args.tmp_directory, args.output_artifact)
-    dataframe.to_csv(tmp_artifact_path)
-    logger.info("Temporary artifact saved to %s" , tmp_artifact_path)
+    # filter outliers in 'longitude' column
+    idx = df['longitude'].between(args.min_longitude, args.max_longitude) & \
+        df['latitude'].between(args.min_latitude, args.max_latitude)
+    df = df[idx].copy()
 
-    artifact = wandb.Artifact(
-        args.output_artifact,
+    # convert last_review column type from str to datetime
+    df['last_review'] = pd.to_datetime(df['last_review'])
+    logger.info('Dataframe cleaning steps done')
+
+    # save resultant dataframe to a local file
+    df.to_csv('clean_sample.csv', index=False)
+    logger.info('Dataframe saved to csv')
+
+    output_artifact = wandb.Artifact(
+        name=args.output_artifact,
         type=args.output_type,
-        description=args.output_description
+        description=args.output_description,
     )
+    output_artifact.add_file('clean_sample.csv')
 
-    artifact.add_file(tmp_artifact_path)
-    run.log_artifact(artifact)
-
-    artifact.wait()
-    logger.info("Cleaned dataset uploaded to wandb")
+    run.log_artifact(output_artifact)
+    logger.info('Cleaned data artifact logged to W&B')
 
 
 if __name__ == "__main__":
@@ -57,54 +59,48 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A very basic data cleaning")
 
     parser.add_argument(
-        "--tmp_directory",
-        type=str,
-        help="Temporary directory for dataset storage",
-        required=True
-    )
-
-    parser.add_argument(
         "--input_artifact",
         type=str,
-        help="Input artifact name",
+        help='Name of input artifact raw data',
         required=True
     )
 
     parser.add_argument(
         "--output_artifact",
         type=str,
-        help="Output artifact name",
+        help='Name of output artifact cleaned data',
         required=True
     )
 
     parser.add_argument(
         "--output_type",
         type=str,
-        help="Output artifact type",
+        help='Type of output artifact',
         required=True
     )
 
     parser.add_argument(
         "--output_description",
         type=str,
-        help="Output artifact description",
+        help='Cleaned data after EDA steps',
         required=True
     )
 
     parser.add_argument(
         "--min_price",
-        type=int,
-        help="Minimum price limit",
+        type=float,
+        help='minimum price to filter price column value',
         required=True
     )
 
     parser.add_argument(
         "--max_price",
-        type=int,
-        help="Maximum price limit",
+        type=float,
+        help='maximum price to filter price column value',
         required=True
     )
 
-    main_args = parser.parse_args()
+    args = parser.parse_args()
 
-    execute(main_args)
+    go(args)
+
